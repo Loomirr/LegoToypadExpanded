@@ -1769,6 +1769,8 @@ void UpdateInputOwnership(HWND window);
 		}
 	}
 
+#include "WorkshopCategories.hpp"
+
 	// Custom tag display order, persisted like the favorites order but keyed
 	// by name. The Special\ scan produces a fixed folder-name order; the user
 	// can reorganize it from the Custom roster (see ReorderCustom).
@@ -5684,7 +5686,6 @@ void UpdateInputOwnership(HWND window);
 				if (entry.binResourceId == binResourceId)
 					return &entry;
 			}
-			return nullptr;
 		}
 		for (size_t i = 0; i < kFranchiseCount; ++i)
 		{
@@ -11332,7 +11333,8 @@ if (changed)
 		// The ?v= token is the embedded-art fingerprint: resource ids can
 		// shift between builds, so without it a browser that cached
 		// /img/<id> could serve a different image that later reused that id.
-		return "/img/" + std::to_string(resourceId) + "?v=" + kAssetFingerprint;
+		return "/img/" + std::to_string(resourceId) + "?v=" + kAssetFingerprint +
+			(resourceId < 0 ? "-" + std::to_string(g_workshopRevision) : "");
 	}
 
 	// Case-insensitive scan for common virtual / VPN / tunnel-adapter markers in
@@ -12397,6 +12399,7 @@ if (changed)
 			std::vector<uint8_t> data;
 			if (resourceId < 0)
 			{
+				const std::lock_guard<std::mutex> filesLock(g_workshopFilesMutex);
 				const size_t pathIndex = static_cast<size_t>(-resourceId - 1);
 				if (pathIndex < g_customPortraitPaths.size())
 					data = LoadFileBytes(g_customPortraitPaths[pathIndex]);
@@ -12668,6 +12671,12 @@ if (changed)
 			return 0;
 		case WM_KEYDOWN:
 		{
+			if (wParam == VK_F5 && g_app.capturingKeyIndex < 0 &&
+			    g_app.capturingBindingIndex < 0 && !g_app.capturingShortcut) {
+				WorkshopRefresh(window);
+				return 0;
+			}
+
 			if (g_app.capturingKeyIndex >= 0)
 			{
 				const size_t index = static_cast<size_t>(g_app.capturingKeyIndex);
@@ -13047,6 +13056,7 @@ if (changed)
 			return 0;
 		case kTickMessage:
 		{
+			WorkshopPoll(window);
 			if (g_focusRetryTicks > 0)
 			{
 				if (!g_app.overlayVisible || g_overlayHiding ||
@@ -13223,6 +13233,31 @@ if (changed)
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
+	// Catalog export is read-only and does not acquire the live app's mutex,
+	// controller, hotkeys or socket. It can inspect a private pack while the
+	// ordinary Toypad remains open.
+	int catalogArgc = 0;
+	LPWSTR* catalogArgv = CommandLineToArgvW(GetCommandLineW(), &catalogArgc);
+	if (catalogArgv && catalogArgc == 3 && wcscmp(catalogArgv[1], L"--workshop-catalog") == 0)
+	{
+		Gdiplus::GdiplusStartupInput input;
+		if (Gdiplus::GdiplusStartup(&g_gdiplusToken, &input, nullptr) != Gdiplus::Ok)
+		{
+			LocalFree(catalogArgv);
+			return 1;
+		}
+		BuildPadSkinList();
+		BuildWorkshopCategories();
+		std::ofstream output(std::filesystem::path(catalogArgv[2]), std::ios::binary);
+		output << BuildCatalogJson();
+		output.close();
+		const int result = output.good() ? 0 : 2;
+		LocalFree(catalogArgv);
+		Gdiplus::GdiplusShutdown(g_gdiplusToken);
+		return result;
+	}
+	if (catalogArgv) LocalFree(catalogArgv);
+
 	// Single instance: the named mutex survives as long as this process, so a
 	// second launch can't grab it and quietly exits instead of running two
 	// pickers (which would fight over the socket, controller and toy-pad).
@@ -13290,7 +13325,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	// Same reasoning as the pad-skin list: showCustomTile (computed from
 	// g_customEntries) has to be right before the franchise grid first
 	// builds its display list.
-	BuildCustomTagList();
+	BuildWorkshopCategories();
 	ApplyCustomOrderFromIni();
 	g_app.port = ReadPort();
 	LoadShortcutFromIni();

@@ -1,4 +1,9 @@
-# LegoToypad
+# LegoToypad Expanded
+
+This fork adds [custom category names, artwork and live discovery](CUSTOM_CATEGORIES.md)
+to the native picker and web catalog. Custom packs stay outside the executable;
+the existing stock library and upstream features remain available. No custom
+character assets or game mods are included. No fork release has been published.
 
 <p align="center">
   <img src="Assets/Branding/Legotoypad_Logo.png" alt="LegoToypad logo" width="220">

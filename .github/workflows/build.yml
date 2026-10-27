@@ -24,6 +24,11 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Test custom category catalog
+        env:
+          TOYPAD_TEST_EXE: ${{ github.workspace }}\build\Release\LegoToypad.exe
+        run: python tests/test_custom_categories.py
+
       - uses: actions/upload-artifact@v4
         with:
           name: LegoToypad

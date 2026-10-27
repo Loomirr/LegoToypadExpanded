@@ -1234,8 +1234,8 @@ def generate(root: Path, out_dir: Path) -> int:
     header.append("    int resourceId;")
     header.append("};")
     header.append("")
-    header.append("extern const Franchise kFranchises[];")
-    header.append("extern const size_t kFranchiseCount;")
+    header.append("extern std::vector<Franchise> kFranchises;")
+    header.append("extern size_t kFranchiseCount;")
     header.append("extern const Ability kAbilities[];")
     header.append("extern const size_t kAbilityCount;")
     header.append("extern const BackgroundChoice kBackgroundChoices[];")
@@ -1376,7 +1376,7 @@ def generate(root: Path, out_dir: Path) -> int:
         build_entries = ", ".join(emit_entry(e) for e in group["builds"])
         return ("{ %s, { %s } }" % (wstr(group["base"]), build_entries))
 
-    cpp.append("const Franchise kFranchises[] = {")
+    cpp.append("std::vector<Franchise> kFranchises = {")
     for franchise in franchises:
         cpp.append("    {")
         cpp.append("        %s," % wstr(franchise["name"]))
@@ -1386,7 +1386,7 @@ def generate(root: Path, out_dir: Path) -> int:
         cpp.append("    },")
     cpp.append("};")
     cpp.append("")
-    cpp.append("const size_t kFranchiseCount = %d;" % len(franchises))
+    cpp.append("size_t kFranchiseCount = %d;" % len(franchises))
     cpp.append("")
     cpp.append("const Ability kAbilities[] = {")
     # An empty initializer list is not valid C++ (same issue as kPadSkins
