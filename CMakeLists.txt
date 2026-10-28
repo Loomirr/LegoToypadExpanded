@@ -66,3 +66,16 @@ add_custom_command(TARGET LegoToypad POST_BUILD
   COMMENT "Copying runtime README"
   VERBATIM
 )
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(window_placement_test tests/window_placement_test.cpp)
+  target_compile_features(window_placement_test PRIVATE cxx_std_20)
+  # Keep assertions active in Release builds.
+  if(MSVC)
+    target_compile_options(window_placement_test PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(window_placement_test PRIVATE -UNDEBUG)
+  endif()
+  add_test(NAME window_placement_test COMMAND window_placement_test)
+endif()

@@ -129,10 +129,24 @@ small second monitor). The layout is unchanged, just smaller.
 
 ### Dimensions Recompiled
 
-When the recompiled PC port (`legodimensions.exe`) is running, the picker opens
-on the game's monitor and closing it always puts focus back into the game, so
-you never need the mouse to click back in. **Settings -> System** shows whether
-the game was found. Without it, everything works as before.
+Both `legodimensions.exe` (Xbox 360 recomp) and `lego_dimensions.exe` (PS4 port)
+are recognized. The picker centres inside the game's client area and shrinks
+proportionally if needed. The saved Window size remains your preferred maximum;
+mouse hit testing follows the actual fitted size. Saved draggable positions are
+clamped inside the game window. The picker follows moves/resizes while open,
+and closing it returns focus to the game. The hold-to-peek HUD also uses the game
+client area instead of the whole monitor. Without a visible game window, the
+existing monitor placement remains available.
+
+**Settings -> System** reports whether the game was found. Windowed and
+borderless modes are supported; exclusive fullscreen may cover desktop overlays.
+
+The asset-free placement check covers both executable names, centering, small
+windows, negative monitor coordinates, dragged positions and invalid bounds:
+
+```text
+ctest --test-dir build -C Release --output-on-failure
+```
 
 ## Setup
 

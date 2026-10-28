@@ -1,4 +1,4 @@
-#include <winsock2.h>
+﻿#include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <iphlpapi.h>
@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "GeneratedAssetTable.h"
+#include "WindowPlacement.hpp"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -4063,9 +4064,10 @@ void UpdateInputOwnership(HWND window);
 	// present-time shrink in Paint.
 	POINT LayoutPointFromClient(POINT client)
 	{
-		if (g_app.windowScalePercent == 100)
-			return client;
-		return POINT{client.x * 100 / g_app.windowScalePercent, client.y * 100 / g_app.windowScalePercent};
+		RECT bounds{};
+		if (g_mainWindow && GetClientRect(g_mainWindow, &bounds) && bounds.right > 0 && bounds.bottom > 0)
+			return POINT{MulDiv(client.x, kOverlayWidth, bounds.right), MulDiv(client.y, kOverlayHeight, bounds.bottom)};
+		return client;
 	}
 
 	POINT LayoutPointFromLParam(LPARAM lParam)
@@ -6495,9 +6497,6 @@ void UpdateInputOwnership(HWND window);
 
 	bool IsRecompiledProcess(DWORD pid)
 	{
-		static DWORD s_lastMatchPid = 0;
-		if (pid != 0 && pid == s_lastMatchPid)
-			return true;
 		HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
 		if (!process)
 			return false;
@@ -6508,9 +6507,8 @@ void UpdateInputOwnership(HWND window);
 		if (!ok)
 			return false;
 		const std::filesystem::path image(std::wstring(buffer.data(), size));
-		if (_wcsicmp(image.filename().c_str(), kRecompiledExeName) != 0)
+		if (!workshop_window::RecompiledImage(image.filename().wstring()))
 			return false;
-		s_lastMatchPid = pid;
 		return true;
 	}
 
@@ -6518,7 +6516,7 @@ void UpdateInputOwnership(HWND window);
 	{
 		// The game's main window: visible, top-level, not owned by anything
 		// (which skips its console and message boxes' owners).
-		if (!IsWindowVisible(window) || GetWindow(window, GW_OWNER) != nullptr)
+		if (!IsWindowVisible(window) || IsIconic(window) || GetWindow(window, GW_OWNER) != nullptr)
 			return TRUE;
 		DWORD pid = 0;
 		GetWindowThreadProcessId(window, &pid);
@@ -6530,9 +6528,14 @@ void UpdateInputOwnership(HWND window);
 
 	HWND FindRecompiledWindow()
 	{
+		static HWND cached=nullptr;
+		static DWORD checked=0;
+		const DWORD now=GetTickCount();
+		if(cached && IsWindow(cached) && IsWindowVisible(cached) && !IsIconic(cached) && now-checked<1000) return cached;
 		RecompiledSearch search;
 		EnumWindows(FindRecompiledWindowProc, reinterpret_cast<LPARAM>(&search));
-		return search.found;
+		cached=search.found;checked=now;
+		return cached;
 	}
 
 	// Cached for the Settings row, which is repainted every frame.
@@ -6559,8 +6562,32 @@ void UpdateInputOwnership(HWND window);
 		return nullptr;
 	}
 
+	bool GameClientBounds(RECT& bounds)
+	{
+		const HWND game = FindRecompiledWindow();
+		if (!game || IsIconic(game) || !GetClientRect(game, &bounds) || bounds.right <= 0 || bounds.bottom <= 0)
+			return false;
+		POINT corners[2]{{bounds.left,bounds.top},{bounds.right,bounds.bottom}};
+		if (!ClientToScreen(game, &corners[0]) || !ClientToScreen(game, &corners[1])) return false;
+		bounds = RECT{corners[0].x,corners[0].y,corners[1].x,corners[1].y};
+		return true;
+	}
+
 	void PositionOverlayWindow(HWND window)
 	{
+		RECT gameBounds{};
+		if (GameClientBounds(gameBounds)) {
+			const workshop_window::Box bounds{gameBounds.left,gameBounds.top,gameBounds.right,gameBounds.bottom};
+			const workshop_window::Box saved{g_app.savedWindowX,g_app.savedWindowY,0,0};
+			const auto fitted=workshop_window::Fit(bounds,ScaledOverlayWidth(),ScaledOverlayHeight(),
+				g_app.windowDraggable && g_app.hasSavedWindowPos ? &saved : nullptr);
+			RECT old{};GetWindowRect(window,&old);
+			if(old.left!=fitted.left || old.top!=fitted.top || old.right!=fitted.right || old.bottom!=fitted.bottom) {
+				SetWindowPos(window,HWND_TOPMOST,fitted.left,fitted.top,fitted.right-fitted.left,fitted.bottom-fitted.top,SWP_NOACTIVATE);
+				InvalidateRect(window,nullptr,FALSE);
+			}
+			return;
+		}
 		HWND reference = (g_app.previousForegroundWindow && IsWindow(g_app.previousForegroundWindow))
 			? g_app.previousForegroundWindow
 			: window;
@@ -8687,8 +8714,15 @@ void UpdateInputOwnership(HWND window);
 	{
 		if (!g_peekWindow || g_app.peekSizeChoice == 0)
 			return;
-		if (g_peekShown && !g_peekHiding)
+		if (g_peekShown && !g_peekHiding) {
+			RECT area{},old{};
+			if (GameClientBounds(area) && GetWindowRect(g_peekWindow,&old) && !EqualRect(&area,&old)) {
+				g_peekCells=ComputePeekCells(area.right-area.left,area.bottom-area.top);
+				SetWindowPos(g_peekWindow,HWND_TOPMOST,area.left,area.top,area.right-area.left,area.bottom-area.top,SWP_NOACTIVATE);
+				PaintPeekWindow(g_peekWindow);
+			}
 			return;
+		}
 		if (g_peekShown && g_peekHiding)
 		{
 			// Caught mid-dismiss - turn the fade around in place; the window
@@ -8716,13 +8750,15 @@ void UpdateInputOwnership(HWND window);
 		if (!GetMonitorInfoW(monitor, &info))
 			return;
 
-		const int width = info.rcMonitor.right - info.rcMonitor.left;
-		const int height = info.rcMonitor.bottom - info.rcMonitor.top;
+		RECT area=info.rcMonitor;
+		GameClientBounds(area);
+		const int width = area.right - area.left;
+		const int height = area.bottom - area.top;
 		if (width <= 0 || height <= 0)
 			return;
 
 		g_peekCells = ComputePeekCells(width, height);
-		SetWindowPos(g_peekWindow, HWND_TOPMOST, info.rcMonitor.left, info.rcMonitor.top,
+		SetWindowPos(g_peekWindow, HWND_TOPMOST, area.left, area.top,
 			width, height, SWP_NOACTIVATE);
 
 		g_peekShown = true;
@@ -13057,6 +13093,11 @@ if (changed)
 		case kTickMessage:
 		{
 			WorkshopPoll(window);
+			static DWORD placementChecked=0;
+			if(g_app.overlayVisible && GetTickCount()-placementChecked>=250) {
+				placementChecked=GetTickCount();
+				if(!g_app.draggingWindow) PositionOverlayWindow(window);
+			}
 			if (g_focusRetryTicks > 0)
 			{
 				if (!g_app.overlayVisible || g_overlayHiding ||
